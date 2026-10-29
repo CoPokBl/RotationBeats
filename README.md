@@ -9,6 +9,8 @@ built around where the floor *will* be.
   becomes the wall behind you.
 - **A hole in the wall ahead** turns into a pit right where you land, so be mid-jump when the
   world turns: your height at the turn becomes how far along the new floor you land.
+- The pause button sits at the top right, next to the bar clock. You can resume where you
+  left off, retry the level, or go back to the menu.
 - Each level is 8 bars. Dying restarts the current level straight away. Later levels get faster
   (100 → 145 BPM), tighter and more demanding.
 
@@ -39,11 +41,46 @@ Requires JDK 17+ and the Android SDK (platform 35).
 ./gradlew testDebugUnitTest   # generator, solver, bot playthroughs, synth
 ```
 
-The release build is signed with the debug key so it can be side-loaded directly. CI
-(`.github/workflows/build.yml`) builds it and uploads the APK as an artifact.
+Without signing secrets, local release builds are signed with the debug key so they can still
+be side-loaded.
 
 Optional: `SCREENSHOTS=1 ./gradlew testDebugUnitTest` renders real game frames to
 `app/build/shots` using Robolectric (it downloads about 350 MB of Android runtime jars).
+
+## Releases (and Obtainium)
+
+Every push to `main` runs `.github/workflows/release.yml`. It tests, builds a signed APK, and
+publishes a GitHub release tagged `v1.0.<run number>` with the APK attached. The run number is
+also the `versionCode`, so each release is an upgrade. Pushes to other branches just build and
+upload the APK as a CI artifact.
+
+To use it in Obtainium, add the app with the repository URL
+(`https://github.com/CoPokBl/RotationBeats`); the default GitHub source settings work as they are.
+
+### One-time signing setup
+
+1. Create a release key (keep the file and passwords somewhere safe, because losing them means
+   users have to reinstall to update):
+   ```bash
+   keytool -genkeypair -v -keystore rotationbeats-release.jks -alias rotationbeats \
+     -keyalg RSA -keysize 4096 -validity 36500
+   ```
+2. Base64 it for GitHub:
+   ```bash
+   base64 -w0 rotationbeats-release.jks > keystore.b64   # macOS: base64 -i rotationbeats-release.jks -o keystore.b64
+   ```
+3. In the repository, go to **Settings → Secrets and variables → Actions → New repository
+   secret** and add:
+   - `SIGNING_KEYSTORE_BASE64`: the contents of `keystore.b64`
+   - `SIGNING_STORE_PASSWORD`: the keystore password
+   - `SIGNING_KEY_ALIAS`: `rotationbeats` (or whatever alias you used)
+   - `SIGNING_KEY_PASSWORD`: the key password (the same as the store password unless you chose
+     a different one)
+4. Delete `keystore.b64`. The release workflow refuses to publish if the secrets are missing
+   or the APK comes out debug-signed.
+
+To sign locally, set `SIGNING_KEYSTORE` (path to the `.jks`) plus the three password and alias
+variables above before running `./gradlew assembleRelease`.
 
 ## Layout
 

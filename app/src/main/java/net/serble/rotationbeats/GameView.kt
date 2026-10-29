@@ -123,7 +123,8 @@ class GameView(context: Context, private val onExit: () -> Unit) : View(context)
 
     fun resume() {
         audio.start()
-        audio.resume()
+        // A paused game keeps its audio paused until the player chooses to carry on.
+        if (state != State.PAUSED) audio.resume()
         if (state == State.MENU) audio.startSong(menuSong())
         running = true
         lastFrameNanos = 0L
@@ -133,11 +134,7 @@ class GameView(context: Context, private val onExit: () -> Unit) : View(context)
     fun pause() {
         running = false
         Choreographer.getInstance().removeFrameCallback(this)
-        if (state == State.PLAY || state == State.DYING) {
-            audio.stopSong()
-            setState(State.PAUSED)
-        }
-        audio.pause()
+        if (state == State.PLAY || state == State.DYING) pauseGame() else audio.pause()
     }
 
     fun release() {
@@ -147,9 +144,26 @@ class GameView(context: Context, private val onExit: () -> Unit) : View(context)
 
     /** Returns true if the back press was consumed. */
     fun back(): Boolean = when (state) {
-        State.PLAY, State.DYING -> { audio.stopSong(); setState(State.PAUSED); true }
-        State.PAUSED -> { toMenu(); true }
+        State.PLAY, State.DYING -> { pauseGame(); true }
+        State.PAUSED -> { audio.resume(); toMenu(); true }
         State.MENU -> false
+    }
+
+    private var pausedWhileDying = false
+
+    private fun pauseGame() {
+        pausedWhileDying = state == State.DYING
+        run?.release()
+        audio.pause()
+        setState(State.PAUSED)
+    }
+
+    private fun resumeGame() {
+        val r = run ?: return toMenu()
+        audio.resume()
+        if (pausedWhileDying) return startRun(r.level)
+        songSec = null
+        setState(State.PLAY)
     }
 
     private fun setState(s: State) {
@@ -204,19 +218,41 @@ class GameView(context: Context, private val onExit: () -> Unit) : View(context)
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                when (state) {
-                    State.PLAY -> run?.press()
-                    State.PAUSED -> if (stateTime > 0.25) run?.let { startRun(it.level) } ?: toMenu()
-                    else -> {}
+                val i = e.actionIndex
+                if (state == State.PLAY || state == State.DYING) {
+                    if (onPauseButton(e.getX(i), e.getY(i))) pauseGame() else run?.press()
                 }
             }
             MotionEvent.ACTION_UP -> {
                 run?.release()
-                if (state == State.MENU) menuTap(e.x, e.y)
+                when (state) {
+                    State.MENU -> menuTap(e.x, e.y)
+                    State.PAUSED -> if (stateTime > 0.2) pausedTap(e.x, e.y)
+                    else -> {}
+                }
             }
             MotionEvent.ACTION_CANCEL -> run?.release()
         }
         return true
+    }
+
+    private fun pauseButtonX() = width - 22 * dp - 20 * dp - 62 * dp
+    private fun pauseButtonY() = 22 * dp + 18 * dp
+
+    private fun onPauseButton(x: Float, y: Float): Boolean {
+        val dx = x - pauseButtonX()
+        val dy = y - pauseButtonY()
+        return dx * dx + dy * dy < (32 * dp) * (32 * dp)
+    }
+
+    private fun pausedTap(x: Float, y: Float) {
+        val h = height.toFloat()
+        val w = width.toFloat()
+        if (abs(y - h * 0.72f) < 30 * dp) {
+            if (abs(x - (w / 2 - 95 * dp)) < 80 * dp) { audio.resume(); run?.let { startRun(it.level) }; return }
+            if (abs(x - (w / 2 + 95 * dp)) < 80 * dp) { audio.resume(); toMenu(); return }
+        }
+        resumeGame()
     }
 
     private fun menuTap(x: Float, y: Float) {
@@ -426,6 +462,7 @@ class GameView(context: Context, private val onExit: () -> Unit) : View(context)
         if (state != State.MENU && r != null) {
             drawHud(canvas, r, pal)
             drawHint(canvas, pal)
+            if (state != State.PAUSED) drawPauseButton(canvas)
         }
         if (deathFlash > 0f) canvas.drawColor(Palette.withAlpha(Color.WHITE, deathFlash * 0.25f))
         if (state == State.PAUSED) drawPaused(canvas)
@@ -694,16 +731,47 @@ class GameView(context: Context, private val onExit: () -> Unit) : View(context)
     }
 
     private fun drawPaused(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
         canvas.drawColor(0xAA000000.toInt())
         textPaint.textAlign = Paint.Align.CENTER
         textPaint.letterSpacing = 0.3f
         textPaint.textSize = 32 * dp
         textPaint.color = Color.WHITE
-        canvas.drawText("PAUSED", width / 2f, height * 0.45f, textPaint)
+        canvas.drawText("PAUSED", w / 2, h * 0.36f, textPaint)
         textPaint.textSize = 14 * dp
         textPaint.letterSpacing = 0.1f
         textPaint.color = Palette.withAlpha(Color.WHITE, 0.7f)
-        canvas.drawText("tap to retry the level  ·  back for menu", width / 2f, height * 0.45f + 34 * dp, textPaint)
+        canvas.drawText(if (pausedWhileDying) "tap to try again" else "tap anywhere to resume", w / 2, h * 0.36f + 34 * dp, textPaint)
+
+        val pal = Palette.of(run?.level ?: selected)
+        textPaint.textSize = 14 * dp
+        textPaint.letterSpacing = 0.2f
+        for ((i, label) in listOf("RETRY LEVEL", "MENU").withIndex()) {
+            val cx = w / 2 + (if (i == 0) -95 else 95) * dp
+            val cy = h * 0.72f
+            rect.set(cx - 78 * dp, cy - 22 * dp, cx + 78 * dp, cy + 22 * dp)
+            uiPaint.style = Paint.Style.STROKE
+            uiPaint.strokeWidth = 1.5f * dp
+            uiPaint.color = Palette.withAlpha(pal.edge, 0.8f)
+            canvas.drawRoundRect(rect, 22 * dp, 22 * dp, uiPaint)
+            uiPaint.style = Paint.Style.FILL
+            textPaint.color = Color.WHITE
+            canvas.drawText(label, cx, cy + 5 * dp, textPaint)
+        }
+    }
+
+    private fun drawPauseButton(canvas: Canvas) {
+        val cx = pauseButtonX()
+        val cy = pauseButtonY()
+        uiPaint.style = Paint.Style.FILL
+        uiPaint.color = Palette.withAlpha(Color.WHITE, 0.08f)
+        canvas.drawCircle(cx, cy, 19 * dp, uiPaint)
+        uiPaint.color = Palette.withAlpha(Color.WHITE, 0.75f)
+        rect.set(cx - 6 * dp, cy - 7 * dp, cx - 2 * dp, cy + 7 * dp)
+        canvas.drawRoundRect(rect, 1.5f * dp, 1.5f * dp, uiPaint)
+        rect.set(cx + 2 * dp, cy - 7 * dp, cx + 6 * dp, cy + 7 * dp)
+        canvas.drawRoundRect(rect, 1.5f * dp, 1.5f * dp, uiPaint)
     }
 
     // ------------------------------------------------------------------ menu

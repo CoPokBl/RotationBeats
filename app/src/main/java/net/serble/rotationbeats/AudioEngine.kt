@@ -38,6 +38,8 @@ class AudioEngine {
 
     // Fallback clock if the device refuses to give us an AudioTrack.
     private var fallbackStartNanos = 0L
+    private var pausedAtNanos = 0L
+    private var resumedAtNanos = 0L
 
     private val ts = AudioTimestamp()
     private var tsFrame = 0L
@@ -92,11 +94,17 @@ class AudioEngine {
     }
 
     fun pause() {
+        if (paused) return
         paused = true
+        pausedAtNanos = System.nanoTime()
         try { track?.pause() } catch (_: Exception) {}
     }
 
     fun resume() {
+        if (!paused) return
+        val now = System.nanoTime()
+        fallbackStartNanos += now - pausedAtNanos
+        resumedAtNanos = now
         try { track?.play() } catch (_: Exception) {}
         paused = false
         tsNanos = 0
@@ -125,7 +133,8 @@ class AudioEngine {
         if (tsNanos == 0L || now - lastTsPoll > 200_000_000L) {
             lastTsPoll = now
             try {
-                if (t.getTimestamp(ts) && ts.nanoTime > 0) {
+                // Timestamps taken before a pause would extrapolate across it, so ignore those.
+                if (t.getTimestamp(ts) && ts.nanoTime > resumedAtNanos) {
                     tsFrame = ts.framePosition
                     tsNanos = ts.nanoTime
                 } else {

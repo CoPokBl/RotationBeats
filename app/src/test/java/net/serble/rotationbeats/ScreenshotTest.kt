@@ -65,6 +65,14 @@ class ScreenshotTest {
             }
             if (run.body.dead) { shot(v, "%02d_dead".format(idx++)); break }
         }
+        // Pause button, then the pause screen.
+        val d = ctx.resources.displayMetrics.density
+        val px = 1600 - 104 * d
+        val py = 40 * d
+        shot(v, "90_pause_button")
+        v.onTouchEvent(android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_DOWN, px, py, 0))
+        v.onTouchEvent(android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_UP, px, py, 0))
+        shot(v, "91_paused")
     }
 
     private fun shouldJump(r: net.serble.rotationbeats.core.Run): Boolean {
