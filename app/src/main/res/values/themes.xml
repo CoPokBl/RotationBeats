@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.RotationBeats" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+    </style>
+    <color name="bg">#0B1220</color>
+</resources>
